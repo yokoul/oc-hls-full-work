@@ -1,0 +1,244 @@
+---
+id: hls-partial-publish
+title: Publish the recording
+tags:
+displayOrder: 100
+description: 
+configuration_panel:
+operations:
+
+  #-- Fall back to */source if */prepared does not exist --#
+  - id: analyze-tracks
+    fail-on-error: true
+    exception-handler-workflow: "partial-error"
+    description: "Analyze tracks in media package and set control variables"
+    configurations:
+      - source-flavor: "*/prepared"
+
+  - id: clone
+    if: "NOT (${presentation_prepared_media} OR ${presenter_prepared_media})"
+    fail-on-error: true
+    exception-handler-workflow: "partial-error"
+    description: "Preparing media"
+    configurations:
+      - source-flavor: "*/source"
+      - target-flavor: "*/prepared"
+
+  #-- Continue processing --#
+  - id: select-tracks
+    exception-handler-workflow: "partial-error"
+    description: "Selecting audio/video streams for processing"
+    configurations:
+      - source-flavor: "*/prepared"
+      - target-flavor: "*/work"
+      - target-tags: "-archive"
+      - audio-muxing: "duplicate"
+
+  - id: analyze-tracks
+    exception-handler-workflow: "partial-error"
+    description: "Analyzing tracks in media package and setting control variables: "
+    configurations: 
+      - source-flavor: "*/work"
+
+  #-- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - --#
+  #-- Cut the video according the SMIL file                             --#
+  #--                                                                   --#
+  #-- Perform cutting according to the edit decision list.              --#
+  #-- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - --#
+  - id: clone
+    exception-handler-workflow: "partial-error"
+    description: "Creating working copy of the cutting information: "
+    configurations: 
+      - source-flavor: "smil/cutting"
+      - target-flavor: "smil/tmp"
+
+  - id: editor
+    exception-handler-workflow: "partial-error"
+    description: "Cutting the recording according to the edit decision list: "
+    configurations: 
+      - source-flavors: "*/work"
+      - smil-flavors: "smil/tmp"
+      - target-smil-flavor: "smil/tmp"
+      - target-flavor-subtype: "trimmed"
+      - interactive: false
+
+  #-- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - --#
+  #-- Extract preview images                                            --#
+  #--                                                                   --#
+  #-- From the edited recording, take preview images for the player,    --#
+  #-- search results etc.                                               --#
+  #-- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - --#
+
+  #-- Encode to engage search result thumbnails --#
+  - id: image
+    exception-handler-workflow: "partial-error"
+    description: "Creating search result default thumbnails: "
+    configurations: 
+      - source-flavor: "*/trimmed"
+      - target-flavor: "*/search+preview"
+      - target-tags: "engage-download"
+      - encoding-profile: "search-cover.http"
+      - time: 3
+
+  #-- Encode to engage player preview images --#
+  - id: image
+    exception-handler-workflow: "partial-error"
+    description: "Creating player preview image for presentation video: "
+    configurations: 
+      - source-flavor: "presentation/trimmed"
+      - target-flavor: "presentation/player+preview"
+      - target-tags: "engage-download"
+      - encoding-profile: "player-preview.http"
+      - time: 3
+
+  #-- Encode to feed cover images --#
+  - id: image
+    exception-handler-workflow: "partial-error"
+    description: "Creating feed cover image: "
+    configurations: 
+      - source-flavor: "*/trimmed"
+      - target-flavor: "*/feed+preview"
+      - target-tags: "atom,rss"
+      - encoding-profile: "feed-cover.http"
+      - time: 3
+
+  #-- Create a cover image with the default template --#
+  - id: image
+    exception-handler-workflow: "partial-error"
+    description: "Creating player preview image for presenter video: "
+    configurations: 
+      - source-flavor: "presenter/trimmed"
+      - target-flavor: "presenter/coverbackground"
+      - encoding-profile: "player-preview.http"
+      - time: 3
+
+  - id: cover-image
+    if: "${presenter_work_media}"
+    fail-on-error: true
+    exception-handler-workflow: "partial-error"
+    description: "Create a cover image: "
+    configurations: 
+      - stylesheet: "file://${karaf.etc}/branding/coverimage.xsl"
+      - width: 1920
+      - height: 1080
+      - posterimage-flavor: "presenter/coverbackground"
+      - target-flavor: "presenter/player+preview"
+      - target-tags: "engage-download"
+
+  #-- Generate timeline preview images --#
+  - id: timelinepreviews
+    fail-on-error: false
+    exception-handler-workflow: "partial-error"
+    description: "Creating timeline preview images: "
+    configurations: 
+      - source-flavor: "*/trimmed"
+      - target-flavor: "*/timeline+preview"
+      - target-tags: "engage-download"
+      - image-count: 100
+
+  #-- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - --#
+  #-- Apply theming                                                     --#
+  #--                                                                   --#
+  #-- Add trailer and bumper to the recording prior to publication.     --#
+  #-- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - --#
+  - id: include
+    description: "Including theming operations: "
+    configurations: 
+      - workflow-id: "hls-partial-theming"
+
+  #-- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - --#
+  #-- Encode for publication to Engage                                  --#
+  #--                                                                   --#
+  #-- Encode audio and video formats to the distribution formats that   --#
+  #-- are required by the publication channel.                          --#
+  #-- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - --#
+  - id: conditional-config
+    description: "Language based encoding configuration"
+    configurations:
+        - configuration-name: "hls-param-profiles"
+        - condition-1: "${8Lang4V}"
+        - value-1:  "hls-8lang-4v.multi25"
+        - condition-2: "${7Lang4V}"
+        - value-2: "hls-7lang-4v.multi25"
+        - condition-3: "${4Lang4V}"
+        - value-3: "hls-4lang-4v.multi25"
+        - condition-4: "${3langflenfr4V}"
+        - value-4: "hls-3lang-fl-en-fr-4v.multi25"
+        - condition-5: "${3langflenes4V}"
+        - value-5: "hls-3lang-fl-en-es-4v.multi25"
+        - condition-6: "${1langfl4V}"
+        - value-6: "hls-1lang-fl-4v.multi25"
+        - no-match: "hls-7lang-4v.multi25"
+
+  - id: encode
+    exception-handler-workflow: "partial-error"
+    description: "HLS encoding presenter/themed with ${hls-param-profiles} profile"
+    configurations:
+      - source-flavor: "presenter/themed"
+      - target-flavor: "presenter/delivery"
+      - target-tags: "engage-download,engage-streaming"
+      - encoding-profile: "${hls-param-profiles}"
+
+  - id: encode
+    exception-handler-workflow: "partial-error"
+    description: "HLS encoding presentation/themed with hls-presentation.multi25 profile"
+    configurations:
+      - source-flavor: "presentation/themed"
+      - target-flavor: "presentation/delivery"
+      - target-tags: "engage-download,engage-streaming"
+      - encoding-profile: "hls-presentation.multi25"
+
+  #-- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - --#
+  #-- Segment video streams and extract metadata                        --#
+  #--                                                                   --#
+  #-- Apply the video segmentation algorithm to the presentation tracks --#
+  #-- and extract segment preview images and metadata.                  --#
+  #-- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - --#
+
+  #-- Run the videosegmentation --#
+  - id: segment-video
+    fail-on-error: false
+    description: "Detecting slide transitions in presentation track: "
+    configurations: 
+      - source-flavor: "presentation/themed"
+      - target-tags: "engage-download"
+
+  #-- Generate segment preview images --#
+  - id: segmentpreviews
+    fail-on-error: false
+    description: "Creating preview images for presentation segments: "
+    configurations: 
+      - source-flavor: "presentation/themed"
+      - target-flavor: "presentation/segment+preview"
+      - reference-flavor: "presentation/delivery"
+      - reference-tags: "engage-download"
+      - target-tags: "engage-download"
+      - encoding-profile: "player-slides.http"
+
+  #-- Extract text form slide preview images --#
+  - id: extract-text
+    fail-on-error: false
+    description: "Extracting text from presentation segments: "
+    configurations: 
+      - source-flavor: "presentation/themed"
+      - target-tags: "engage-download"
+
+  #-- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - --#
+  #-- Publish to publication channels                                   --#
+  #--                                                                   --#
+  #-- Declare into the api channel.                                     --#
+  #--                                                                   --#
+  #-- Send the encoded material along with the metadata to the          --#
+  #-- publication channels.                                             --#
+  #-- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - --#
+
+  - id: publish-engage-aws
+    max-attempts: 2
+    fail-on-error: true
+    exception-handler-workflow: "error"
+    description: "Distribute and publish to engage player using AWS S3"
+    configurations:
+      - download-source-flavors: "dublincore/*,security/*"
+      - download-source-tags: "engage-download,atom,rss"
+      - check-availability: true
+      - strategy: "merge"

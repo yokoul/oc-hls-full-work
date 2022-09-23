@@ -1,0 +1,34 @@
+---
+id: hls-retract 
+title: Retract 
+tags:
+  - archive
+description: Retract a recording
+displayOrder: 100
+configuration_panel:
+operations: 
+
+  - id: retract-engage
+    exception-handler-workflow: "partial-error"
+    description: "Retract recording from Engage"
+
+  #-- Here you can place operations to retract publication from your publication channels --#
+  - id: snapshot
+    exception-handler-workflow: "hls-partial-error"
+    description: "Archiving state of retracted recording"
+
+  - id: cleanup
+    fail-on-error: false
+    description: "Remove temporary processing artifacts"
+    configurations: 
+      #-- On systems with shared workspace or working file repository --#
+      #-- you want to set this option to false. -->
+      - delete-external: true
+      #-- ACLs are required again when working through ActiveMQ messages --#
+      - preserve-flavors: "security/*"
+
+state-mappings:
+  - state: "running"
+    value: EVENTS.EVENTS.STATE_MAPPING.RETRACTING
+  - state: "failing"
+    value: EVENTS.EVENTS.STATE_MAPPING.RETRACTING

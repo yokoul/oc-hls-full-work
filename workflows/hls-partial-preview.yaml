@@ -1,0 +1,135 @@
+---
+id: hls-partial-preview
+title: Prepare preview artifacts
+tags:
+description:
+configuration_panel:
+operations:
+  
+  #-- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - --#
+  #-- Preview movies                                                    --#
+  #--                                                                   --#
+  #-- Based on the source artifacts, extract preview versions.          --#
+  #-- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - --#
+
+  #-- Analyze media assets --#
+  - id: analyze-tracks
+    exception-handler-workflow: "partial-error"
+    description: "Analyze tracks in media package and set control variables: "
+    configurations:
+      - source-flavor: "*/source"
+
+  #-- Transcode video previews --#
+  - id: encode
+    if: "NOT (${presenter_source_video} AND ${presentation_source_video})"
+    exception-handler-workflow: "partial-error"
+    description: "Create single-stream video preview: "
+    configurations:
+      - source-flavors: "*/source"
+      - target-flavor: "*/preview"
+      - target-tags: "preview"
+      - encoding-profile: "mp4-preview.http"
+
+  - id: composite
+    if: "${presenter_source_video} AND ${presentation_source_video}"
+    exception-handler-workflow: "partial-error"
+    description: "Create dual-stream video preview: "
+    configurations:
+      - source-flavor-lower: "presentation/source"
+      - source-flavor-upper: "presenter/source"
+      - encoding-profile: "mp4-preview.dual.http"
+      - source-audio-name: "upper"
+      - target-flavor: "composite/preview"
+      - target-tags: "preview"
+      - output-resolution: "1280x360"
+      - output-background: "0x000000FF"
+      - layout: "preview"
+      - layout-preview: |-
+          {"horizontalCoverage":0.5,"anchorOffset":{"referring":{"left":1.0,"top":0.0},"reference":{"left":1.0,"top":0.0},"offset":{"x":0,"y":0}}};
+          {"horizontalCoverage":0.5,"anchorOffset":{"referring":{"left":0.0,"top":0.0},"reference":{"left":0.0,"top":0.0},"offset":{"x":0,"y":0}}};
+
+  #-- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - --#
+  #-- Audio waveform                                                    --#
+  #--                                                                   --#
+  #-- Create the waveform.                                              --#
+  #-- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - --#
+  - id: waveform
+    exception-handler-workflow: "partial-error"
+    description: "Generating waveform: "
+    configurations:
+      - source-flavor: "*/preview"
+      - target-flavor: "*/waveform"
+      - target-tags: "preview"
+
+  #-- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - --#
+  #-- Track previews                                                    --#
+  #--                                                                   --#
+  #-- Create track previews for video editor stream selection feature   --#
+  #-- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - --#
+  - id: image
+    exception-handler-workflow: "partial-error"
+    description: "Create video preview images for presenter and presentation: "
+    configurations:
+      - source-flavor: "*/source"
+      - target-flavor: "*/video+preview"
+      - target-tags: "preview"
+      - encoding-profile: "editor.tracks.preview"
+      - time: "50%"
+
+  - id: waveform
+    fail-on-error: false
+    description: "Generating audio preview waveform: "
+    configurations:
+      - source-flavor: "*/source"
+      - target-flavor: "*/audio+preview"
+      - target-tags: "preview"
+      - min-width: "688"
+      - max-width: "688"
+      - height: "58"
+
+  #-- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - --#
+  #-- Silence detection                                                 --#
+  #--                                                                   --#
+  #-- Run silence detection to provide hints to the video editor.       --#
+  #-- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - --#
+
+  #-- Run silence detection --#
+  - id: silence
+    if: "NOT ${straightToPublishing}"
+    fail-on-error: false
+    description: "Detecting silence: "
+    configurations:
+      - source-flavors: "*/preview"
+      - smil-flavor-subtype: "silence"
+      - reference-tracks-flavor: "*/source"
+
+  #-- Tag the results for internal publishing --#
+  #-- Fixme: remove once "silence" operation supports target-tags --#
+  - id: tag
+    if: "NOT ${straightToPublishing}"
+    description: "Preparing silence detection for preview: "
+    configurations:
+      - source-flavors: "*/silence"
+      - target-tags: "+archive"
+
+  #-- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - --#
+  #-- Publish previews                                                  --#
+  #--                                                                   --#
+  #-- Distributing preview artifacts to preview publication channel.    --#
+  #-- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - --#
+
+  #-- Publish previews --#
+  - id: publish-configure-aws
+    exception-handler-workflow: "partial-error"
+    description: "Publish to editor: "
+    configurations:
+      - download-source-tags: "preview,editor"
+      - channel-id: "internal"
+      - url-pattern: "${org_org_opencastproject_admin_ui_url!'http://localhost:8080'}/admin-ng/index.html#/events/events/${event_id}/tools/editor"
+      - check-availability: false
+
+state-mappings:
+  - state: "running"
+    value: EVENTS.EVENTS.STATE_MAPPING.UPDATING_PREVIEWS
+  - state: "failing"
+    value: EVENTS.EVENTS.STATE_MAPPING.UPDATING_PREVIEWS
